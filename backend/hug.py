@@ -4,7 +4,7 @@ import re
 
 app = FastAPI()
 
-local_dir = "models/TinyLlama_TinyLlama-1.1B-Chat-v1.0"
+local_dir = "Writer/palmyra-small"
 tokenizer = AutoTokenizer.from_pretrained(local_dir)
 model = AutoModelForCausalLM.from_pretrained(local_dir)
 
