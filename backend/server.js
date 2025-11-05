@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import userRouter from "./routes/users.js";
 import postRouter from "./routes/posts.js";
-import { getReddit } from "../reddit.js";
+import { getReddit } from "./reddit.js";
 
 dotenv.config();
 
