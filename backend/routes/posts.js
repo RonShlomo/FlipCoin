@@ -34,7 +34,7 @@ async function fetchCryptoPrices() {
 }
 
 fetchCryptoPrices();
-setInterval(fetchCryptoPrices, 60 * 1000);
+setInterval(fetchCryptoPrices, 5 * 60 * 1000);
 
 router.post("/prices", async (req, res) => {
   const { userId } = req.body;
