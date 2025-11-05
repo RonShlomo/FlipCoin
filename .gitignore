@@ -1,0 +1,71 @@
+# -------------------------------
+# Node.js / Backend
+# -------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build artifacts
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+
+# -------------------------------
+# React / Frontend
+# -------------------------------
+# Build output
+/frontend/build/
+/frontend/out/
+
+# Dependency directories
+/frontend/node_modules/
+
+# Local env files
+/frontend/.env.local
+/frontend/.env.development.local
+/frontend/.env.test.local
+/frontend/.env.production.local
+
+# -------------------------------
+# Docker
+# -------------------------------
+# Ignore Docker volumes or local data
+docker-compose.override.yml
+*.dockerignore
+
+# -------------------------------
+# Editor directories / files
+# -------------------------------
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# -------------------------------
+# OS / system files
+# -------------------------------
+.DS_Store
+Thumbs.db
+
+# -------------------------------
+# Custom project folders
+# -------------------------------
+/shelf/
+/workspace.xml
+/httpRequests/
+/dataSources/
+/dataSources.local.xml
