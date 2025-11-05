@@ -1,10 +1,10 @@
 import express from "express";
-import reddit from "../server.js";
 import axios from "axios";
 import dotenv from "dotenv";
 import pool from "../config/db.js";
 import fetch from "node-fetch";
 import cron from "node-cron";
+import { getReddit } from "../reddit.js";
 
 dotenv.config();
 const router = express.Router();
@@ -28,8 +28,6 @@ async function fetchCryptoPrices() {
     const res = await axios.get(url, { headers });
     cachedData = res.data;
     lastUpdated = new Date().toISOString();
-
-    console.log("Cached crypto data updated at", lastUpdated);
   } catch (err) {
     console.error("Error fetching crypto prices:", err.message);
   }
@@ -79,10 +77,8 @@ async function fetchAndStoreCryptopanicPosts() {
     );
     const postCount = parseInt(countResult.rows[0].count);
     if (postCount >= 50) {
-      console.log("already have posts in DB");
       return;
     }
-    console.log("fetching new posts");
     const response = await fetch(`${PANIC_URL}?auth_token=${API_KEY}`);
     if (!response.ok) throw new Error(`API returned ${response.status}`);
     const data = await response.json();
@@ -117,8 +113,6 @@ async function fetchAndStoreCryptopanicPosts() {
         ]
       );
     }
-
-    console.log(`Saved ${posts.length} posts from Cryptopanic`);
   } catch (err) {
     console.error("Error fetching or saving Cryptopanic posts:", err.message);
   }
@@ -162,8 +156,7 @@ router.post("/news", async (req, res) => {
 
 async function fetchAndStoreMemes() {
   try {
-    console.log("Fetching new memes from Reddit...");
-
+    const reddit = getReddit();
     const subreddit = await reddit.getSubreddit("cryptocurrencymemes");
     const posts = await subreddit.getHot({ limit: 200 });
 
@@ -197,8 +190,6 @@ async function fetchAndStoreMemes() {
         ]
       );
     }
-
-    console.log(`Fetched and stored ${memes.length} memes`);
   } catch (err) {
     console.error("Error fetching memes:", err);
   }
@@ -214,7 +205,6 @@ router.get("/memes", async (req, res) => {
     const memeCount = parseInt(countResult.rows[0].count);
 
     if (memeCount < 50) {
-      console.log("Less than 50 memes, fetching more...");
       await fetchAndStoreMemes();
     }
 
@@ -230,7 +220,6 @@ router.get("/memes", async (req, res) => {
 
 router.get("/insight", async (req, res) => {
   try {
-    console.log("got a new tip request");
     const response = await axios.get("http://localhost:8000/insight");
     const tip = response.data.tip;
     const insertResult = await pool.query(
@@ -250,10 +239,8 @@ router.get("/insight", async (req, res) => {
       );
       insight = selectResult.rows[0];
     }
-    console.log("insight: ", insight);
     res.json({ insight });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
