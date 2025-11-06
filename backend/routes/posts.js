@@ -220,11 +220,11 @@ router.get("/memes", async (req, res) => {
 
 router.get("/insight", async (req, res) => {
   try {
-    const response = await axios.get(
-      "https://flipcoin-python-server.onrender.com/insight"
-    );
-    const tip = response.data.tip;
-    const insertResult = await pool.query(
+        const response = await axios.get("https://flipcoin-python-server.onrender.com/insight", {
+          params: { text: "Give one concise crypto tip" }
+        });
+        const tip = response.data.output;
+        const insertResult = await pool.query(
       `INSERT INTO ai_insights (content)
        VALUES ($1)
        ON CONFLICT (content) DO NOTHING
@@ -244,165 +244,6 @@ router.get("/insight", async (req, res) => {
     res.json({ insight });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-function extractTextFromHF(data) {
-  if (!data) return "";
-  if (typeof data === "string") return data;
-
-  if (Array.isArray(data) && data.length > 0) {
-    const first = data[0];
-    return (
-      first?.generated_text ??
-      first?.summary_text ??
-      (typeof first === "string" ? first : "")
-    );
-  }
-
-  if (typeof data === "object") {
-    return data.generated_text ?? data.summary_text ?? "";
-  }
-
-  return "";
-}
-
-function cleanTip(text) {
-  let tip = (text || "")
-    .replace(/\s+/g, " ")
-    .replace(/^["'\-•\s]+/, "")
-    .trim();
-
-  const firstSentence =
-    tip.split(/(?<=\.)\s+/)[0] || tip.split(/[!?]\s+/)[0] || tip;
-  const words = firstSentence.split(/\s+/);
-  if (words.length > 40) {
-    tip = words
-      .slice(0, 40)
-      .join(" ")
-      .replace(/[,.!?;:]+$/, "");
-  } else {
-    tip = firstSentence;
-  }
-
-  tip = tip.replace(
-    /\b(bitcoin|btc|ethereum|eth|solana|sol|xrp|doge|cardano|ada)\b/gi,
-    "a large-cap asset"
-  );
-
-  if (!/[.!?]$/.test(tip)) tip += ".";
-
-  return tip;
-}
-
-async function callHFOnce(model, prompt, hfToken) {
-  const headers = {
-    Authorization: `Bearer ${hfToken}`,
-    "Content-Type": "application/json",
-  };
-
-  const body = {
-    inputs: prompt,
-    parameters: {
-      max_new_tokens: 90,
-      temperature: 0.7,
-      top_p: 0.9,
-      return_full_text: false,
-      repetition_penalty: 1.1,
-    },
-    options: {
-      wait_for_model: true,
-      use_cache: true,
-    },
-  };
-
-  const { data } = await axios.post(HF_API_URL(model), body, {
-    headers,
-    timeout: 30000,
-  });
-
-  return extractTextFromHF(data);
-}
-
-const HF_API_URL = (model) =>
-  `https://api-inference.huggingface.co/models/${model}`;
-
-async function getCryptoTip({ hfToken = process.env.HUG_TOKEN } = {}) {
-  if (!hfToken) {
-    throw new Error("Missing HUG_TOKEN environment variable.");
-  }
-
-  const prompt =
-    "You are a concise crypto investing tutor. Generate ONE practical tip (max 40 words), non-generic, low-risk oriented, and do NOT mention specific tokens by name. Format: plain sentence.";
-
-  const candidates = [
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    "HuggingFaceH4/zephyr-7b-beta",
-    "google/flan-t5-base",
-    "facebook/bart-large-cnn",
-  ];
-
-  let lastErr = null;
-  for (const m of candidates) {
-    try {
-      const raw = await callHFOnce(m, prompt, hfToken);
-      const tip = cleanTip(raw);
-      if (tip) return tip;
-      lastErr = new Error(`Empty output from ${m}`);
-    } catch (e) {
-      lastErr = e;
-      const msg = (e && e.message) || "";
-      console.warn(`[HF] ${m} failed: ${msg}`);
-      continue;
-    }
-  }
-
-  throw new Error(
-    `All Hugging Face candidates failed${lastErr ? `: ${lastErr.message}` : ""}`
-  );
-}
-
-router.get("/insight2", async (req, res) => {
-  try {
-    const tip = await getCryptoTip({});
-    const insertResult = await pool.query(
-      `INSERT INTO ai_insights (content)
-       VALUES ($1)
-       ON CONFLICT (content) DO NOTHING
-       RETURNING id, content;`,
-      [tip]
-    );
-
-    let insight;
-    if (insertResult.rows.length > 0) {
-      insight = insertResult.rows[0];
-    } else {
-      const selectResult = await pool.query(
-        `SELECT id, content FROM ai_insights WHERE content = $1`,
-        [tip]
-      );
-      insight = selectResult.rows[0];
-    }
-
-    res.json({ insight });
-  } catch (err) {
-    console.error("insight2 error:", err?.message || err);
-    res.status(500).json({ error: err.message || "Failed to create insight" });
-  }
-});
-
-cron.schedule("0 7 * * *", async () => {
-  try {
-    const tip = await getCryptoTip({});
-    await pool.query(
-      `INSERT INTO ai_insights (content)
-       VALUES ($1)
-       ON CONFLICT (content) DO NOTHING;`,
-      [tip]
-    );
-    console.log("[cron] stored daily tip");
-  } catch (e) {
-    console.error("[cron] failed:", e.message);
   }
 });
 
