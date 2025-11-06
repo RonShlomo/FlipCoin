@@ -2,33 +2,28 @@ import os
 import re
 import torch
 from fastapi import FastAPI
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM, pipeline
 
 app = FastAPI()
-
-HF_MODEL = os.environ.get("HF_MODEL", "sshleifer/tiny-gpt2")
-
+HF_MODEL = os.environ.get("HF_MODEL", "google/flan-t5-small")
 _pipe = None
+_task = None
 
 def get_pipe():
-    global _pipe
+    global _pipe, _task
     if _pipe is None:
         os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
         os.environ.setdefault("HF_HOME", "/tmp/hf")
         torch.set_num_threads(1)
-
-        tok = AutoTokenizer.from_pretrained(HF_MODEL)
-        mdl = AutoModelForCausalLM.from_pretrained(
-            HF_MODEL,
-            low_cpu_mem_usage=True,
-            torch_dtype=torch.float32,
-        )
-        _pipe = pipeline(
-            "text-generation",
-            model=mdl,
-            tokenizer=tok,
-            device_map="cpu",
-        )
+        if "flan-t5" in HF_MODEL or "t5-" in HF_MODEL:
+            _task = "text2text-generation"
+            tok = AutoTokenizer.from_pretrained(HF_MODEL)
+            mdl = AutoModelForSeq2SeqLM.from_pretrained(HF_MODEL, low_cpu_mem_usage=True, torch_dtype=torch.float32)
+        else:
+            _task = "text-generation"
+            tok = AutoTokenizer.from_pretrained(HF_MODEL)
+            mdl = AutoModelForCausalLM.from_pretrained(HF_MODEL, low_cpu_mem_usage=True, torch_dtype=torch.float32)
+        _pipe = pipeline(_task, model=mdl, tokenizer=tok, device_map="cpu")
     return _pipe
 
 def clean_output(text: str) -> str:
@@ -43,16 +38,19 @@ def clean_output(text: str) -> str:
         output = first_sentence + "."
     return output
 
+@app.get("/")
+def root():
+    return {"ok": True, "endpoints": ["/insight"]}
+
 @app.get("/insight")
 def get_insight():
     pipe = get_pipe()
-    prompt = (
-        "### System:\n"
-        "You are a professional crypto trader. Respond with one concise sentence under 25 words.\n"
-        "### User:\n"
-        "Give one actionable crypto trading insight.\n"
-        "### Assistant:\n"
-    )
+    if _task == "text2text-generation":
+        prompt = "Give ONE actionable crypto trading insight in under 25 words."
+        out = pipe(prompt, max_new_tokens=48, temperature=0.6)[0]["generated_text"]
+        return {"tip": clean_output(out)}
+    prompt = ("### System:\nYou are a professional crypto trader. Respond with one concise sentence under 25 words.\n"
+              "### User:\nGive one actionable crypto trading insight.\n### Assistant:\n")
     out = pipe(
         prompt,
         max_new_tokens=60,
@@ -67,5 +65,4 @@ def get_insight():
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("hug:app", host="0.0.0.0", port=port)
+    uvicorn.run("hug:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
