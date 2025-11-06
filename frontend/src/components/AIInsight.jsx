@@ -9,7 +9,7 @@ export default function AIInsight({ onContentLoad }) {
     async function fetchTip() {
       try {
         const res = await fetch(
-          "https://flipcoin-express-server.onrender.com/posts/tip"
+          "https://flipcoin-express-server.onrender.com/posts/tip?fresh=1"
         );
         if (!res.ok) throw new Error("Failed to fetch");
         const data = await res.json();

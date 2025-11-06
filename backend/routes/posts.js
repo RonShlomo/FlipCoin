@@ -5,6 +5,9 @@ import pool from "../config/db.js";
 import fetch from "node-fetch";
 import cron from "node-cron";
 import { getReddit } from "../reddit.js";
+import { execFile } from "child_process";
+import path from "path";
+import fs from "fs";
 
 dotenv.config();
 const router = express.Router();
@@ -218,17 +221,71 @@ router.get("/memes", async (req, res) => {
   }
 });
 
+let isRunning = false;
+
+function resolveScript() {
+  const candidates = [
+    path.resolve(process.cwd(), "backend", "hug.py"),
+    path.resolve(process.cwd(), "hug.py"),
+  ];
+  for (const p of candidates) if (fs.existsSync(p)) return p;
+  return candidates[0];
+}
+
+function pickPythonCmd() {
+  if (process.env.PYTHON_CMD) return process.env.PYTHON_CMD;
+  return process.platform === "win32" ? "py" : "python3";
+}
+
+function runTip() {
+  return new Promise((resolve, reject) => {
+    if (isRunning) return reject(new Error("job_in_progress"));
+    isRunning = true;
+    const script = resolveScript();
+    const cmd = pickPythonCmd();
+    const args =
+      process.platform === "win32" && cmd === "py" ? ["-3", script] : [script];
+    execFile(cmd, args, { timeout: 180000 }, (err, stdout, stderr) => {
+      isRunning = false;
+      if (err) return reject(err);
+      const out = (stdout || "").toString().trim();
+      if (!out) return reject(new Error("empty_stdout"));
+      resolve(out);
+    });
+  });
+}
+
+export function startHourlyTipJob() {
+  cron.schedule(
+    "0 * * * *",
+    async () => {
+      try {
+        const tipText = (await runTip()).trim();
+        await pool.query(
+          `INSERT INTO ai_insights (content)
+           VALUES ($1)
+           ON CONFLICT (content) DO NOTHING;`,
+          [tipText]
+        );
+      } catch {}
+    },
+    { timezone: "Asia/Jerusalem" }
+  );
+}
+
 router.get("/tip", async (req, res) => {
   try {
-    const result = await pool.query(
+    const { rows } = await pool.query(
       `SELECT content FROM ai_insights
-       ORDER BY created_at DESC
+       ORDER BY RANDOM()
        LIMIT 1;`
     );
-    res.json({ tip: result.rows[0]?.content || "Tip not available yet." });
-  } catch (err) {
-    console.error("Tip route error:", err);
-    res.status(500).json({ error: "failed_to_fetch_tip" });
+    return res.json({
+      tip: rows[0]?.content || "Tip not available yet.",
+      fresh: false,
+    });
+  } catch {
+    return res.status(500).json({ error: "tip_failed" });
   }
 });
 
