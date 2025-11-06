@@ -220,7 +220,7 @@ router.get("/memes", async (req, res) => {
 
 router.get("/insight", async (req, res) => {
   try {
-    const response = await axios.get("http://localhost:8000/insight");
+    const response = await axios.get("https://flipcoin-python-server.onrender.com/insight");
     const tip = response.data.tip;
     const insertResult = await pool.query(
       `INSERT INTO ai_insights (content)
