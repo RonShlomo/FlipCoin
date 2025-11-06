@@ -1,67 +1,159 @@
 import os
 import re
+import logging
+from typing import Optional
+
+from fastapi import FastAPI, Query, HTTPException
+from pydantic import BaseModel
+from transformers import (
+    AutoConfig,
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    pipeline,
+)
 import torch
-from fastapi import FastAPI
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, AutoModelForSeq2SeqLM
 
-app = FastAPI()
+logger = logging.getLogger("uvicorn.error")
 
-HF_MODEL = os.environ.get("HF_MODEL", "sshleifer/tiny-gpt2")
+app = FastAPI(title="Insight API", version="1.0.0")
 
-_pipe = None
+HF_MODEL = os.getenv("HF_MODEL", "google/flan-t5-small")
+DEVICE = "cpu"
+DTYPE = torch.float32
 
-def get_pipe():
-    global _pipe
-    if _pipe is None:
-        os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-        os.environ.setdefault("HF_HOME", "/tmp/hf")
-        torch.set_num_threads(1)
+_PIPE = None
+_PIPE_TASK = None
 
-        tok = AutoTokenizer.from_pretrained(HF_MODEL)
-        mdl = AutoModelForSeq2SeqLM.from_pretrained(HF_MODEL, torch_dtype=torch.float32)
-        _pipe = pipeline(
-            "text-generation",
-            model=mdl,
-            tokenizer=tok,
-            device_map="cpu",
-        )
-    return _pipe
 
-def clean_output(text: str) -> str:
+def _clean_output(text: str) -> str:
     output = text.strip()
     output = re.sub(r"^\s*\d+[\.\)]\s*", "", output)
     output = re.sub(r"(\.\s*)\d+[\.\)]\s*", r"\1", output)
     output = re.sub(r"^(?:sure|certainly|of course|here'?s|well|okay|ok)[,!\s:;-]+", "", output, flags=re.I)
     if ":" in output and len(output.split(":", 1)[0]) < len(output):
-        output = output.split(":", 1)[1].strip()
-    first_sentence = output.split(".")[0]
-    if len(first_sentence) > 10:
-        output = first_sentence + "."
+        maybe_label, rest = output.split(":", 1)
+        if len(maybe_label) <= 14:
+            output = rest.strip()
     return output
 
-@app.get("/insight")
-def get_insight():
-    pipe = get_pipe()
-    prompt = (
-        "### System:\n"
-        "You are a professional crypto trader. Respond with one concise sentence under 25 words.\n"
-        "### User:\n"
-        "Give one actionable crypto trading insight.\n"
-        "### Assistant:\n"
-    )
-    out = pipe(
-        prompt,
-        max_new_tokens=60,
-        do_sample=True,
-        temperature=0.6,
-        repetition_penalty=1.25,
-        eos_token_id=pipe.tokenizer.eos_token_id,
-        pad_token_id=pipe.tokenizer.eos_token_id,
-    )[0]["generated_text"]
-    text = out.split("### Assistant:")[-1].strip()
-    return {"tip": clean_output(text)}
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("hug:app", host="0.0.0.0", port=port)
+def _detect_task(config: AutoConfig) -> str:
+    archs = config.architectures or []
+    archs_str = " ".join(archs).lower()
+
+    if any(k in archs_str for k in ["t5", "bart", "mbart", "m2m", "pegasus", "prophetnet", "ul2", "t0"]):
+        return "text2text-generation"
+
+    return "text-generation"
+
+
+def get_pipe():
+    global _PIPE, _PIPE_TASK
+    if _PIPE is not None:
+        return _PIPE
+
+    logger.info(f"Loading model: {HF_MODEL}")
+
+    config = AutoConfig.from_pretrained(HF_MODEL)
+    tokenizer = AutoTokenizer.from_pretrained(HF_MODEL)
+
+    task = _detect_task(config)
+    _PIPE_TASK = task
+
+    if task == "text2text-generation":
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            HF_MODEL,
+            torch_dtype=DTYPE,
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            HF_MODEL,
+            torch_dtype=DTYPE,
+        )
+
+    logger.info(f"Initialized task '{task}' on device '{DEVICE}'")
+
+    gen_pipe = pipeline(
+        task,
+        model=model,
+        tokenizer=tokenizer,
+        device_map=None,
+    )
+
+    return gen_pipe
+
+
+class InsightRequest(BaseModel):
+    text: str
+    max_new_tokens: Optional[int] = 128
+    temperature: Optional[float] = 0.3
+    top_p: Optional[float] = 0.95
+
+
+@app.get("/health")
+def health():
+    try:
+        _ = get_pipe()
+        return {"status": "ok", "model": HF_MODEL}
+    except Exception as e:
+        logger.exception("Health check failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/insight")
+def get_insight(
+    text: str = Query(..., min_length=1, description="Input text/prompt"),
+    max_new_tokens: int = Query(128, ge=1, le=512),
+    temperature: float = Query(0.3, ge=0.0, le=2.0),
+    top_p: float = Query(0.95, ge=0.0, le=1.0),
+):
+    try:
+        pipe = get_pipe()
+
+        kwargs = dict(
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+        )
+
+        do_sample = temperature > 0.0
+        kwargs["do_sample"] = do_sample
+
+        outputs = pipe(text, **kwargs)
+
+        if _PIPE_TASK == "text2text-generation":
+            generated = outputs[0].get("generated_text", "")
+        else:
+            generated = outputs[0].get("generated_text") or outputs[0].get("text", "")
+
+        cleaned = _clean_output(generated or "")
+
+        return {
+            "input": text,
+            "output": cleaned,
+            "raw": generated,
+            "model": HF_MODEL,
+            "task": _PIPE_TASK,
+            "params": {
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+                "do_sample": do_sample,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error in /insight")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/insight")
+def post_insight(body: InsightRequest):
+    return get_insight(
+        text=body.text,
+        max_new_tokens=body.max_new_tokens or 128,
+        temperature=body.temperature or 0.3,
+        top_p=body.top_p or 0.95,
+    )

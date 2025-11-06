@@ -247,6 +247,75 @@ router.get("/insight", async (req, res) => {
   }
 });
 
+const HF_API_URL = (model) =>
+  `https://api-inference.huggingface.co/models/${model}`;
+
+async function getCryptoTip({
+  model = "mistralai/Mixtral-8x7B-Instruct-v0.1",
+  hfToken = process.env.HUG_TOKEN,
+}) {
+  const prompt = `You are a concise crypto investing tutor. 
+Generate ONE practical tip (max 40 words), non-generic, low-risk oriented, 
+and do NOT mention specific tokens by name. Format: plain sentence.`;
+
+  const headers = {
+    Authorization: `Bearer ${hfToken}`,
+    "Content-Type": "application/json",
+  };
+
+  const body = {
+    inputs: prompt,
+    parameters: {
+      max_new_tokens: 90,
+      temperature: 0.7,
+      top_p: 0.9,
+      return_full_text: false,
+      repetition_penalty: 1.1,
+    },
+  };
+
+  try {
+    const { data } = await axios.post(HF_API_URL(model), body, {
+      headers,
+      timeout: 30000,
+    });
+    const text =
+      Array.isArray(data) && data.length && data[0].generated_text
+        ? data[0].generated_text
+        : typeof data === "string"
+        ? data
+        : JSON.stringify(data);
+
+    const tip = (text || "")
+      .replace(/\s+/g, " ")
+      .replace(/^["'\-•\s]+/, "")
+      .trim();
+
+    if (!tip) throw new Error("Empty tip from model");
+    return tip;
+  } catch (e) {
+    if (!/fallback tried/.test(e.message)) {
+      try {
+        const fallback = await axios.post(
+          HF_API_URL("google/flan-t5-base"),
+          { inputs: prompt },
+          { headers, timeout: 20000 }
+        );
+        const tip =
+          Array.isArray(fallback.data) &&
+          fallback.data.length &&
+          fallback.data[0].generated_text
+            ? fallback.data[0].generated_text
+            : fallback.data?.[0]?.summary_text || String(fallback.data);
+        return (tip || "").trim();
+      } catch (e2) {
+        throw new Error(`HF request failed (and fallback): ${e.message}`);
+      }
+    }
+    throw e;
+  }
+}
+
 router.get("/insight2", async (req, res) => {
   try {
     const tip = await getCryptoTip({});
@@ -272,6 +341,21 @@ router.get("/insight2", async (req, res) => {
     res.json({ insight });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+cron.schedule("0 7 * * *", async () => {
+  try {
+    const tip = await getCryptoTip({});
+    await pool.query(
+      `INSERT INTO ai_insights (content)
+       VALUES ($1)
+       ON CONFLICT (content) DO NOTHING;`,
+      [tip]
+    );
+    console.log("[cron] stored daily tip");
+  } catch (e) {
+    console.error("[cron] failed:", e.message);
   }
 });
 
