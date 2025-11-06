@@ -6,11 +6,14 @@ export default function PricesTable({ userId }) {
   useEffect(() => {
     async function fetchPrices() {
       try {
-        const res = await fetch("http://localhost:5050/posts/prices", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId }),
-        });
+        const res = await fetch(
+          "https://flipcoin-express-server.onrender.com/posts/prices",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId }),
+          }
+        );
 
         if (!res.ok) {
           throw new Error("Server error");

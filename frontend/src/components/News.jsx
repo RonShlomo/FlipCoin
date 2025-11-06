@@ -7,12 +7,15 @@ export default function News({ userId, onContentLoad }) {
   useEffect(() => {
     async function fetchNews() {
       try {
-        const res = await fetch("http://localhost:5050/posts/news", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({ userId }),
-        });
+        const res = await fetch(
+          "https://flipcoin-express-server.onrender.com/posts/news",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            cache: "no-store",
+            body: JSON.stringify({ userId }),
+          }
+        );
         if (!res.ok) throw new Error("Server error");
 
         const data = await res.json();

@@ -11,11 +11,14 @@ const Section = ({ title, children, userId, contentType }) => {
   const postFeedback = async (liked) => {
     if (!contentId) return;
     try {
-      const response = await fetch("http://localhost:5050/posts/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, contentId, contentType, liked }),
-      });
+      const response = await fetch(
+        "https://flipcoin-express-server.onrender.com/posts/feedback",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, contentId, contentType, liked }),
+        }
+      );
       const result = await response.json();
       if (result.action === "cleared") setFeedback(null);
       else setFeedback(liked ? "like" : "dislike");

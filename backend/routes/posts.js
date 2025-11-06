@@ -220,10 +220,46 @@ router.get("/memes", async (req, res) => {
 
 router.get("/insight", async (req, res) => {
   try {
-    const response = await axios.get(
-      "https://flipcoin-python-server.onrender.com/insight"
-    );
-    const tip = response.data.tip;
+    console.log("got a new tip request");
+
+    try {
+      await axios.get("http://127.0.0.1:8000/health", { timeout: 10000 });
+    } catch (e) {
+      console.warn("health failed (ignoring):", e.message);
+    }
+
+    const prompt = [
+      "You are a concise crypto investing tutor.",
+      "Write exactly one practical, low-risk investing tip for beginners.",
+      "Do not mention any coin or token by name.",
+      "Keep it under forty words.",
+      "Answer:",
+    ].join(" ");
+
+    const callInsight = async () =>
+      axios.post(
+        "http://127.0.0.1:8000/insight",
+        {
+          text: prompt,
+          max_new_tokens: 48,
+          temperature: 0.3,
+          top_p: 0.95,
+        },
+        { timeout: 60000 }
+      );
+
+    let response;
+    try {
+      response = await callInsight();
+    } catch (e1) {
+      console.warn("first /insight call timed out, retrying...");
+      await new Promise((r) => setTimeout(r, 1500));
+      response = await callInsight();
+    }
+
+    const tip = (response.data.output || response.data.raw || "").trim();
+    if (!tip) throw new Error("Insight API returned empty output");
+
     const insertResult = await pool.query(
       `INSERT INTO ai_insights (content)
        VALUES ($1)
@@ -231,6 +267,7 @@ router.get("/insight", async (req, res) => {
        RETURNING id, content;`,
       [tip]
     );
+
     let insight;
     if (insertResult.rows.length > 0) {
       insight = insertResult.rows[0];
@@ -241,8 +278,10 @@ router.get("/insight", async (req, res) => {
       );
       insight = selectResult.rows[0];
     }
+
     res.json({ insight });
   } catch (err) {
+    console.error("insight route error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -337,9 +376,10 @@ async function getCryptoTip({ hfToken = process.env.HUG_TOKEN } = {}) {
 
   const candidates = [
     "mistralai/Mistral-7B-Instruct-v0.3",
-    "HuggingFaceH4/zephyr-7b-beta",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct",
+    "microsoft/Phi-3.5-mini-instruct",
     "google/flan-t5-base",
-    "facebook/bart-large-cnn",
   ];
 
   let lastErr = null;

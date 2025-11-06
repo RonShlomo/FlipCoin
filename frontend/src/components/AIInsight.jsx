@@ -7,7 +7,7 @@ export default function AIInsight({ onContentLoad }) {
   useEffect(() => {
     const fetchInsight = async () => {
       try {
-        const res = await fetch("http://localhost:5050/posts/insight");
+        const res = await fetch("http://127.0.0.1:5050/posts/insight");
         const data = await res.json();
         console.log("data: ", data);
         setInsight(data.insight.content);

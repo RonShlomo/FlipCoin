@@ -8,7 +8,7 @@ export default function CryptoMeme({ onContentLoad }) {
     if (fetched.current) return;
     fetched.current = true;
 
-    fetch("http://localhost:5050/posts/memes")
+    fetch("https://flipcoin-express-server.onrender.com/posts/memes")
       .then((res) => res.json())
       .then((data) => {
         const random = data[Math.floor(Math.random() * data.length)];

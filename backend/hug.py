@@ -1,159 +1,140 @@
 import os
+os.environ["TRANSFORMERS_NO_TORCHVISION"] = "1"
+
 import re
 import logging
+import random
 from typing import Optional
-
 from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
-from transformers import (
-    AutoConfig,
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    AutoModelForCausalLM,
-    pipeline,
-)
+from transformers import AutoConfig, AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
 import torch
 
 logger = logging.getLogger("uvicorn.error")
+app = FastAPI(title="Insight API", version="1.1.0")
 
-app = FastAPI(title="Insight API", version="1.0.0")
-
-HF_MODEL = os.getenv("HF_MODEL", "google/flan-t5-small")
-DEVICE = "cpu"
+HF_MODEL = os.getenv("HF_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+DEVICE = os.getenv("HF_DEVICE", "cpu")
 DTYPE = torch.float32
 
-_PIPE = None
-_PIPE_TASK = None
-
+_MODEL = None
+_TOKENIZER = None
+_TASK = None
 
 def _clean_output(text: str) -> str:
     output = text.strip()
-    output = re.sub(r"^\s*\d+[\.\)]\s*", "", output)
-    output = re.sub(r"(\.\s*)\d+[\.\)]\s*", r"\1", output)
+    output = re.sub(r"(?i)\b(?:<=?|=)\s*\d+\s*words\.?", "", output)
+    output = re.sub(r"(?i)\bunder\s+\w+\s+words\b\.?", "", output)
+    output = re.sub(r"(?i)\bdo not mention.*?(?:name|token)s?.*?\.?", "", output)
+    output = re.sub(r"(?i)\banswer:\s*", "", output)
+    output = re.sub(r"^(?:\d+[\.\)]\s*)+", "", output)
     output = re.sub(r"^(?:sure|certainly|of course|here'?s|well|okay|ok)[,!\s:;-]+", "", output, flags=re.I)
-    if ":" in output and len(output.split(":", 1)[0]) < len(output):
-        maybe_label, rest = output.split(":", 1)
-        if len(maybe_label) <= 14:
-            output = rest.strip()
+    output = re.sub(r"\s{2,}", " ", output).strip()
+    sentence_match = re.match(r'^(.*?[.!?]["”\']?)(\s|$)', output)
+    if sentence_match:
+        output = sentence_match.group(1).strip()
     return output
 
 
-def _detect_task(config: AutoConfig) -> str:
-    archs = config.architectures or []
-    archs_str = " ".join(archs).lower()
+def _looks_like_instruction(s: str) -> bool:
+    s_low = s.lower()
+    bad = ["you are a concise", "write exactly one", "keep it under", "do not mention", "answer:"]
+    return any(k in s_low for k in bad)
 
+def _detect_task(config) -> str:
+    archs = (config.architectures or [])
+    archs_str = " ".join(archs).lower()
     if any(k in archs_str for k in ["t5", "bart", "mbart", "m2m", "pegasus", "prophetnet", "ul2", "t0"]):
         return "text2text-generation"
-
     return "text-generation"
 
-
-def get_pipe():
-    global _PIPE, _PIPE_TASK
-    if _PIPE is not None:
-        return _PIPE
-
-    logger.info(f"Loading model: {HF_MODEL}")
-
+def _load_model():
+    global _MODEL, _TOKENIZER, _TASK
+    if _MODEL is not None:
+        return _MODEL, _TOKENIZER, _TASK
     config = AutoConfig.from_pretrained(HF_MODEL)
     tokenizer = AutoTokenizer.from_pretrained(HF_MODEL)
-
     task = _detect_task(config)
-    _PIPE_TASK = task
-
     if task == "text2text-generation":
-        model = AutoModelForSeq2SeqLM.from_pretrained(
-            HF_MODEL,
-            torch_dtype=DTYPE,
-        )
+        model = AutoModelForSeq2SeqLM.from_pretrained(HF_MODEL, torch_dtype=DTYPE, low_cpu_mem_usage=True)
     else:
-        model = AutoModelForCausalLM.from_pretrained(
-            HF_MODEL,
-            torch_dtype=DTYPE,
-        )
+        model = AutoModelForCausalLM.from_pretrained(HF_MODEL, torch_dtype=DTYPE, low_cpu_mem_usage=True)
+    model = model.to(DEVICE)
+    _MODEL, _TOKENIZER, _TASK = model, tokenizer, task
+    return _MODEL, _TOKENIZER, _TASK
 
-    logger.info(f"Initialized task '{task}' on device '{DEVICE}'")
-
-    gen_pipe = pipeline(
-        task,
-        model=model,
-        tokenizer=tokenizer,
-        device_map=None,
+def _generate(text: str, max_new_tokens: int, temperature: float, top_p: float) -> str:
+    model, tokenizer, task = _load_model()
+    inputs = tokenizer(text, return_tensors="pt").to(DEVICE)
+    gen_kwargs = dict(
+        max_new_tokens=max_new_tokens,
+        do_sample=True,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=1.1,
+        no_repeat_ngram_size=3,
+        early_stopping=True,
     )
-
-    return gen_pipe
-
+    with torch.no_grad():
+        output_ids = model.generate(**inputs, **gen_kwargs)
+    if task == "text2text-generation":
+        generated = tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+    else:
+        prompt_len = inputs["input_ids"].shape[-1]
+        continuation = output_ids[0][prompt_len:]
+        generated = tokenizer.decode(continuation, skip_special_tokens=True).strip()
+    return generated or ""
 
 class InsightRequest(BaseModel):
     text: str
-    max_new_tokens: Optional[int] = 128
-    temperature: Optional[float] = 0.3
-    top_p: Optional[float] = 0.95
+    max_new_tokens: Optional[int] = 60
+    temperature: Optional[float] = 0.7
+    top_p: Optional[float] = 0.9
 
+@app.on_event("startup")
+def _warmup():
+    try:
+        _ = _load_model()
+        print(f"✅ Model {HF_MODEL} loaded on {DEVICE}")
+    except Exception:
+        logger.exception("Warmup failed")
 
 @app.get("/health")
 def health():
     try:
-        _ = get_pipe()
-        return {"status": "ok", "model": HF_MODEL}
+        _ = _load_model()
+        return {"status": "ok", "model": HF_MODEL, "task": _TASK, "device": DEVICE}
     except Exception as e:
-        logger.exception("Health check failed")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.get("/insight")
-def get_insight(
-    text: str = Query(..., min_length=1, description="Input text/prompt"),
-    max_new_tokens: int = Query(128, ge=1, le=512),
-    temperature: float = Query(0.3, ge=0.0, le=2.0),
-    top_p: float = Query(0.95, ge=0.0, le=1.0),
+@app.get("/tip")
+def tip(
+    max_new_tokens: int = Query(60, ge=8, le=100),
+    temperature: float = Query(0.7, ge=0.0, le=2.0),
+    top_p: float = Query(0.9, ge=0.0, le=1.0),
 ):
-    try:
-        pipe = get_pipe()
-
-        kwargs = dict(
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-        )
-
-        do_sample = temperature > 0.0
-        kwargs["do_sample"] = do_sample
-
-        outputs = pipe(text, **kwargs)
-
-        if _PIPE_TASK == "text2text-generation":
-            generated = outputs[0].get("generated_text", "")
-        else:
-            generated = outputs[0].get("generated_text") or outputs[0].get("text", "")
-
-        cleaned = _clean_output(generated or "")
-
-        return {
-            "input": text,
-            "output": cleaned,
-            "raw": generated,
-            "model": HF_MODEL,
-            "task": _PIPE_TASK,
-            "params": {
-                "max_new_tokens": max_new_tokens,
-                "temperature": temperature,
-                "top_p": top_p,
-                "do_sample": do_sample,
-            },
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Error in /insight")
-        raise HTTPException(status_code=500, detail=str(e))
-
+    prompt_id = random.randint(1000, 9999)
+    base_prompt = (
+        f"Instruction {prompt_id}: Write one short, low-risk crypto investing tip for beginners. "
+        "Avoid naming any specific tokens. Keep it concise and practical.\nTip:"
+    )
+    raw = _generate(base_prompt, max_new_tokens, temperature, top_p)
+    cleaned = _clean_output(raw)
+    if not cleaned or len(cleaned.split()) < 4 or _looks_like_instruction(cleaned):
+        alt = "Give one concise, practical crypto investing tip for beginners. No token names."
+        raw = _generate(alt, max_new_tokens, temperature, top_p)
+        cleaned = _clean_output(raw)
+    return {"tip": cleaned}
 
 @app.post("/insight")
 def post_insight(body: InsightRequest):
-    return get_insight(
-        text=body.text,
-        max_new_tokens=body.max_new_tokens or 128,
-        temperature=body.temperature or 0.3,
-        top_p=body.top_p or 0.95,
-    )
+    try:
+        raw = _generate(body.text, body.max_new_tokens, body.temperature, body.top_p)
+        cleaned = _clean_output(raw)
+        if not cleaned or len(cleaned.split()) < 4 or _looks_like_instruction(cleaned):
+            alt = "Give one concise, low-risk crypto investing tip for a beginner. No token names."
+            raw = _generate(alt, body.max_new_tokens, body.temperature, body.top_p)
+            cleaned = _clean_output(raw)
+        return {"input": body.text, "output": cleaned, "model": HF_MODEL}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -61,14 +61,17 @@ export default function OnboardForm({ username, id }) {
         ...formData,
       };
       try {
-        const res = await fetch("http://localhost:5050/users/onboard", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(payload),
-        });
+        const res = await fetch(
+          "https://flipcoin-express-server.onrender.com/users/onboard",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(payload),
+          }
+        );
 
         if (!res.ok) {
           throw new Error("Failed to submit form");

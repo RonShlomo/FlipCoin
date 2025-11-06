@@ -17,11 +17,14 @@ export default function HomePage() {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!isRegisterForm) {
-      const response = await fetch("http://localhost:5050/users/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(details),
-      });
+      const response = await fetch(
+        "https://flipcoin-express-server.onrender.com/users/login",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(details),
+        }
+      );
       const data = await response.json();
       if (!response.ok) toast.error(data.error || "Something went wrong!");
       else {
@@ -34,11 +37,14 @@ export default function HomePage() {
         });
       }
     } else {
-      const response = await fetch("http://localhost:5050/users/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(details),
-      });
+      const response = await fetch(
+        "https://flipcoin-express-server.onrender.com/users/register",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(details),
+        }
+      );
       const data = await response.json();
       console.log(data);
       if (!response.ok) toast.error(data.error || "Something went wrong!");
