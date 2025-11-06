@@ -220,6 +220,7 @@ router.get("/memes", async (req, res) => {
 
 router.get("/insight", async (req, res) => {
   try {
+    console.log("got a tip request");
     const response = await axios.get("https://flipcoin-python-server.onrender.com/insight");
     const tip = response.data.tip;
     const insertResult = await pool.query(
