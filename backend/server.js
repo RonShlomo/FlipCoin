@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import userRouter from "./routes/users.js";
 import postRouter from "./routes/posts.js";
-import { getReddit } from "./reddit.js";
+import { startDailyTipJob } from "./services/dailyTip.js";
 
 dotenv.config();
 
@@ -13,6 +13,8 @@ app.use(express.json());
 
 app.use("/users", userRouter);
 app.use("/posts", postRouter);
+
+startDailyTipJob();
 
 const PORT = process.env.PORT || 5050;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

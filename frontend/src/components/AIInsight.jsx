@@ -1,34 +1,36 @@
 import { useState, useEffect } from "react";
 
 export default function AIInsight({ onContentLoad }) {
-  const [insight, setInsight] = useState("Loading AI insight...");
+  const [tip, setTip] = useState("Loading...");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const fetchInsight = async () => {
+    async function fetchTip() {
       try {
-        const res = await fetch("http://127.0.0.1:5050/posts/insight");
+        const res = await fetch(
+          "https://flipcoin-express-server.onrender.com/posts/tip"
+        );
+        if (!res.ok) throw new Error("Failed to fetch");
         const data = await res.json();
-        console.log("data: ", data);
-        setInsight(data.insight.content);
-        if (onContentLoad && data?.insight?.id) {
-          onContentLoad(data.insight.id);
-        }
+        setTip(data.tip);
+        onContentLoad?.(data.tip);
       } catch (err) {
         console.error(err);
-        setInsight("Failed to load insight.");
+        setError("Failed to load tip");
       } finally {
         setLoading(false);
       }
-    };
-    fetchInsight();
-  }, []);
+    }
+
+    fetchTip();
+  }, [onContentLoad]);
 
   if (loading) return <p>Loading insight...</p>;
 
   return (
     <div className="ai-insight">
-      <p>{insight}</p>
+      <p>{tip}</p>
     </div>
   );
 }

@@ -1,0 +1,21 @@
+.LikeButton {
+  font-size: 28px;          /* גודל האמוג'י */
+  padding: 12px 18px;       /* מגדיל את ה–hit area */
+  min-width: 56px;          /* שטח לחיצה נוח */
+  min-height: 56px;
+  line-height: 1;           
+  border-radius: 12px;      
+  border: none;
+  cursor: pointer;
+  transition: transform .08s ease, box-shadow .08s ease;
+}
+
+.LikeButton:focus-visible {
+  outline: 3px solid #2b67f6;
+  outline-offset: 2px;
+}
+
+.LikeButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+}

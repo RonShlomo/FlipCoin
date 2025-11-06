@@ -17,14 +17,11 @@ export default function HomePage() {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!isRegisterForm) {
-      const response = await fetch(
-        "https://flipcoin-express-server.onrender.com/users/login",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(details),
-        }
-      );
+      const response = await fetch("http://127.0.0.1:5050/users/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(details),
+      });
       const data = await response.json();
       if (!response.ok) toast.error(data.error || "Something went wrong!");
       else {

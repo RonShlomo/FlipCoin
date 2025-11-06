@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import "./Section.css";
 
 const Section = ({ title, children, userId, contentType }) => {
   const [feedback, setFeedback] = useState(null);
@@ -59,8 +60,9 @@ const Section = ({ title, children, userId, contentType }) => {
     >
       <h3>{title}</h3>
       <div className="content">{wrappedChildren}</div>
-      <div style={{ marginTop: "10px" }}>
+      <div style={{ marginTop: "10px", marginBottom: "25px" }}>
         <button
+          className="LikeButton"
           onClick={() => {
             handleClick(true);
           }}
@@ -73,6 +75,7 @@ const Section = ({ title, children, userId, contentType }) => {
           👍
         </button>
         <button
+          className="LikeButton"
           onClick={() => handleClick(false)}
           style={{
             marginLeft: "10px",
