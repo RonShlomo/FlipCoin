@@ -32,6 +32,6 @@ You are a professional crypto trader. Respond with one concise sentence under 25
 Give one actionable crypto trading insight.
 ### Assistant:
 """
-    result = pipe(prompt, max_new_tokens=100, do_sample=True, temperature=0.6, repetition_penalty=1.25)
+    result = pipe(prompt, max_new_tokens=60, do_sample=True, temperature=0.6, repetition_penalty=1.25)
     text = result[0]["generated_text"].split("### Assistant:")[-1].strip()
     return {"tip": clean_output(text)}
