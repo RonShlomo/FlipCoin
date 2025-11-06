@@ -220,6 +220,7 @@ router.get("/memes", async (req, res) => {
 
 router.get("/insight", async (req, res) => {
   try {
+<<<<<<< HEAD
     console.log("got a new tip request");
 
     try {
@@ -411,40 +412,27 @@ router.get("/insight2", async (req, res) => {
        ON CONFLICT (content) DO NOTHING
        RETURNING id, content;`,
       [tip]
+=======
+    const result = await pool.query(
+      `SELECT id, content 
+       FROM ai_insights 
+       ORDER BY RANDOM() 
+       LIMIT 1;`
+>>>>>>> 44af1c9a4c05e18adc10f6fe2a37b4c11906cb90
     );
 
-    let insight;
-    if (insertResult.rows.length > 0) {
-      insight = insertResult.rows[0];
-    } else {
-      const selectResult = await pool.query(
-        `SELECT id, content FROM ai_insights WHERE content = $1`,
-        [tip]
-      );
-      insight = selectResult.rows[0];
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "No insights found." });
     }
 
+    const insight = result.rows[0];
     res.json({ insight });
   } catch (err) {
-    console.error("insight2 error:", err?.message || err);
-    res.status(500).json({ error: err.message || "Failed to create insight" });
+    console.error("Error fetching random insight:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-cron.schedule("0 7 * * *", async () => {
-  try {
-    const tip = await getCryptoTip({});
-    await pool.query(
-      `INSERT INTO ai_insights (content)
-       VALUES ($1)
-       ON CONFLICT (content) DO NOTHING;`,
-      [tip]
-    );
-    console.log("[cron] stored daily tip");
-  } catch (e) {
-    console.error("[cron] failed:", e.message);
-  }
-});
 
 router.post("/feedback", async (req, res) => {
   try {
