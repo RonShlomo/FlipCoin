@@ -247,17 +247,55 @@ router.get("/insight", async (req, res) => {
   }
 });
 
-const HF_API_URL = (model) =>
-  `https://api-inference.huggingface.co/models/${model}`;
+function extractTextFromHF(data) {
+  if (!data) return "";
+  if (typeof data === "string") return data;
 
-async function getCryptoTip({
-  model = "mistralai/Mixtral-8x7B-Instruct-v0.1",
-  hfToken = process.env.HUG_TOKEN,
-}) {
-  const prompt = `You are a concise crypto investing tutor. 
-Generate ONE practical tip (max 40 words), non-generic, low-risk oriented, 
-and do NOT mention specific tokens by name. Format: plain sentence.`;
+  if (Array.isArray(data) && data.length > 0) {
+    const first = data[0];
+    return (
+      first?.generated_text ??
+      first?.summary_text ??
+      (typeof first === "string" ? first : "")
+    );
+  }
 
+  if (typeof data === "object") {
+    return data.generated_text ?? data.summary_text ?? "";
+  }
+
+  return "";
+}
+
+function cleanTip(text) {
+  let tip = (text || "")
+    .replace(/\s+/g, " ")
+    .replace(/^["'\-•\s]+/, "")
+    .trim();
+
+  const firstSentence =
+    tip.split(/(?<=\.)\s+/)[0] || tip.split(/[!?]\s+/)[0] || tip;
+  const words = firstSentence.split(/\s+/);
+  if (words.length > 40) {
+    tip = words
+      .slice(0, 40)
+      .join(" ")
+      .replace(/[,.!?;:]+$/, "");
+  } else {
+    tip = firstSentence;
+  }
+
+  tip = tip.replace(
+    /\b(bitcoin|btc|ethereum|eth|solana|sol|xrp|doge|cardano|ada)\b/gi,
+    "a large-cap asset"
+  );
+
+  if (!/[.!?]$/.test(tip)) tip += ".";
+
+  return tip;
+}
+
+async function callHFOnce(model, prompt, hfToken) {
   const headers = {
     Authorization: `Bearer ${hfToken}`,
     "Content-Type": "application/json",
@@ -272,48 +310,56 @@ and do NOT mention specific tokens by name. Format: plain sentence.`;
       return_full_text: false,
       repetition_penalty: 1.1,
     },
+    options: {
+      wait_for_model: true,
+      use_cache: true,
+    },
   };
 
-  try {
-    const { data } = await axios.post(HF_API_URL(model), body, {
-      headers,
-      timeout: 30000,
-    });
-    const text =
-      Array.isArray(data) && data.length && data[0].generated_text
-        ? data[0].generated_text
-        : typeof data === "string"
-        ? data
-        : JSON.stringify(data);
+  const { data } = await axios.post(HF_API_URL(model), body, {
+    headers,
+    timeout: 30000,
+  });
 
-    const tip = (text || "")
-      .replace(/\s+/g, " ")
-      .replace(/^["'\-•\s]+/, "")
-      .trim();
+  return extractTextFromHF(data);
+}
 
-    if (!tip) throw new Error("Empty tip from model");
-    return tip;
-  } catch (e) {
-    if (!/fallback tried/.test(e.message)) {
-      try {
-        const fallback = await axios.post(
-          HF_API_URL("google/flan-t5-base"),
-          { inputs: prompt },
-          { headers, timeout: 20000 }
-        );
-        const tip =
-          Array.isArray(fallback.data) &&
-          fallback.data.length &&
-          fallback.data[0].generated_text
-            ? fallback.data[0].generated_text
-            : fallback.data?.[0]?.summary_text || String(fallback.data);
-        return (tip || "").trim();
-      } catch (e2) {
-        throw new Error(`HF request failed (and fallback): ${e.message}`);
-      }
-    }
-    throw e;
+const HF_API_URL = (model) =>
+  `https://api-inference.huggingface.co/models/${model}`;
+
+async function getCryptoTip({ hfToken = process.env.HUG_TOKEN } = {}) {
+  if (!hfToken) {
+    throw new Error("Missing HUG_TOKEN environment variable.");
   }
+
+  const prompt =
+    "You are a concise crypto investing tutor. Generate ONE practical tip (max 40 words), non-generic, low-risk oriented, and do NOT mention specific tokens by name. Format: plain sentence.";
+
+  const candidates = [
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "HuggingFaceH4/zephyr-7b-beta",
+    "google/flan-t5-base",
+    "facebook/bart-large-cnn",
+  ];
+
+  let lastErr = null;
+  for (const m of candidates) {
+    try {
+      const raw = await callHFOnce(m, prompt, hfToken);
+      const tip = cleanTip(raw);
+      if (tip) return tip;
+      lastErr = new Error(`Empty output from ${m}`);
+    } catch (e) {
+      lastErr = e;
+      const msg = (e && e.message) || "";
+      console.warn(`[HF] ${m} failed: ${msg}`);
+      continue;
+    }
+  }
+
+  throw new Error(
+    `All Hugging Face candidates failed${lastErr ? `: ${lastErr.message}` : ""}`
+  );
 }
 
 router.get("/insight2", async (req, res) => {
@@ -340,7 +386,8 @@ router.get("/insight2", async (req, res) => {
 
     res.json({ insight });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("insight2 error:", err?.message || err);
+    res.status(500).json({ error: err.message || "Failed to create insight" });
   }
 });
 
