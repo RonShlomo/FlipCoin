@@ -220,32 +220,25 @@ router.get("/memes", async (req, res) => {
 
 router.get("/insight", async (req, res) => {
   try {
-        const response = await axios.get("https://flipcoin-python-server.onrender.com/insight", {
-          params: { text: "Give one concise crypto tip" }
-        });
-        const tip = response.data.output;
-        const insertResult = await pool.query(
-      `INSERT INTO ai_insights (content)
-       VALUES ($1)
-       ON CONFLICT (content) DO NOTHING
-       RETURNING id, content;`,
-      [tip]
+    const result = await pool.query(
+      `SELECT id, content 
+       FROM ai_insights 
+       ORDER BY RANDOM() 
+       LIMIT 1;`
     );
-    let insight;
-    if (insertResult.rows.length > 0) {
-      insight = insertResult.rows[0];
-    } else {
-      const selectResult = await pool.query(
-        `SELECT id, content FROM ai_insights WHERE content = $1`,
-        [tip]
-      );
-      insight = selectResult.rows[0];
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "No insights found." });
     }
+
+    const insight = result.rows[0];
     res.json({ insight });
   } catch (err) {
+    console.error("Error fetching random insight:", err);
     res.status(500).json({ error: err.message });
   }
 });
+
 
 router.post("/feedback", async (req, res) => {
   try {
