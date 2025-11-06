@@ -220,7 +220,9 @@ router.get("/memes", async (req, res) => {
 
 router.get("/insight", async (req, res) => {
   try {
-    const response = await axios.get("https://flipcoin-python-server.onrender.com/insight");
+    const response = await axios.get(
+      "https://flipcoin-python-server.onrender.com/insight"
+    );
     const tip = response.data.tip;
     const insertResult = await pool.query(
       `INSERT INTO ai_insights (content)
@@ -239,6 +241,34 @@ router.get("/insight", async (req, res) => {
       );
       insight = selectResult.rows[0];
     }
+    res.json({ insight });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/insight2", async (req, res) => {
+  try {
+    const tip = await getCryptoTip({});
+    const insertResult = await pool.query(
+      `INSERT INTO ai_insights (content)
+       VALUES ($1)
+       ON CONFLICT (content) DO NOTHING
+       RETURNING id, content;`,
+      [tip]
+    );
+
+    let insight;
+    if (insertResult.rows.length > 0) {
+      insight = insertResult.rows[0];
+    } else {
+      const selectResult = await pool.query(
+        `SELECT id, content FROM ai_insights WHERE content = $1`,
+        [tip]
+      );
+      insight = selectResult.rows[0];
+    }
+
     res.json({ insight });
   } catch (err) {
     res.status(500).json({ error: err.message });

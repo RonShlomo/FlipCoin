@@ -2,7 +2,7 @@ import os
 import re
 import torch
 from fastapi import FastAPI
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, AutoModelForSeq2SeqLM
 
 app = FastAPI()
 
@@ -18,11 +18,7 @@ def get_pipe():
         torch.set_num_threads(1)
 
         tok = AutoTokenizer.from_pretrained(HF_MODEL)
-        mdl = AutoModelForCausalLM.from_pretrained(
-            HF_MODEL,
-            low_cpu_mem_usage=True,
-            torch_dtype=torch.float32,
-        )
+        mdl = AutoModelForSeq2SeqLM.from_pretrained(HF_MODEL, torch_dtype=torch.float32)
         _pipe = pipeline(
             "text-generation",
             model=mdl,
